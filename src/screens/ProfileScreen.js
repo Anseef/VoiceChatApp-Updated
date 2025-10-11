@@ -19,7 +19,7 @@ const LogoutIcon = ({ color = '#000', size = 24 }) => (
 
 // --- ProfileScreen Component ---
 const ProfileScreen = ({ navigation }) => { // Ensure navigation prop is received
-    const { isAccessibilityMode, setIsAuthenticated } = useAppContext();
+    const { isAccessibilityMode, setIsAuthenticated, currentUser } = useAppContext();
     const handleLogout = () => setIsAuthenticated(false);
 
     // Initialize voice recognition
@@ -79,12 +79,12 @@ const ProfileScreen = ({ navigation }) => { // Ensure navigation prop is receive
             <View style={styles.profileCard}>
                 <Image source={require('../../assets/MainProfile.png')} style={styles.profileAvatar} />
                 <View style={styles.profileInfo}>
-                    <Text style={styles.profileName}>Yato</Text>
-                    <Text style={styles.profileEmail}>official4yato@gmail.com</Text>
+                    <Text style={styles.profileName}>{currentUser.username}</Text>
+                    <Text style={styles.profileEmail}>{currentUser.email}</Text>
                 </View>
-                <TouchableOpacity>
+                {/* <TouchableOpacity>
                     <Text style={styles.threeDots}>...</Text>
-                </TouchableOpacity>
+                </TouchableOpacity> */}
             </View>
 
             {/* Options */}

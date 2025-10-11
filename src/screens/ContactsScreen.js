@@ -6,7 +6,7 @@ import {
     StyleSheet,
     FlatList,
     TouchableOpacity,
-    Image, // <--- ADD THIS IMPORT!
+    Image,
     BackHandler,
     ActivityIndicator,
 } from 'react-native';
@@ -19,16 +19,15 @@ import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
 import { useAppContext } from '../context/AppContext';
 
 const ContactsScreen = ({ navigation }) => {
-    const { isAccessibilityMode, setAccessibilityMode, setIsAuthenticated, setContacts } = useAppContext();
-    const { status, recognizedText, error, startListening, setRecognizedText } = useVoiceRecognition();
+    const { isAccessibilityMode, setAccessibilityMode, setIsAuthenticated, currentUser } = useAppContext();
+    const { status, recognizedText, startListening, setRecognizedText } = useVoiceRecognition();
 
     const [activeChats, setActiveChats] = useState([]); // State to hold active chats from DB
     const [isLoading, setIsLoading] = useState(true);
     const [fetchError, setFetchError] = useState(null);
     const isFocused = useIsFocused();
     const hasVisited = useRef(false);
-
-    // --- MODIFIED useEffect for fetching active chats from the backend ---
+    
     useEffect(() => {
         const fetchActiveChats = async () => {
             setIsLoading(true);
@@ -44,17 +43,14 @@ const ContactsScreen = ({ navigation }) => {
                 const data = await response.json();
 
                 // Filter chats to only show those where currentUserId is a participant
-                const currentUserId = "yato";
-                const userChats = data.filter(chat =>
-                    chat.participant1Id === currentUserId || chat.participant2Id === currentUserId
-                );
+                const currentUserId = currentUser?._id;
+                const userChats = data.filter(chat => {
+                    const chatP1 = chat.participant1Id;
+                    const chatP2 = chat.participant2Id;
+                    const match = chatP1 === currentUserId || chatP2 === currentUserId;
+                    return match;
+                    });
 
-                // console.log("ContactsScreen: Fetched active chats:", userChats.map(c => ({
-                //     _id: c._id,
-                //     name: c.name,
-                //     p1: c.participant1Id, // Check these in your logs!
-                //     p2: c.participant2Id  // Check these in your logs!
-                // })));
                 setActiveChats(userChats); // Store active chats in local state
             } catch (error) {
                 console.error("Error fetching active chats:", error);
@@ -128,16 +124,6 @@ useEffect(() => {
 
                 if (chat) {
                     Speech.speak(`Opening chat with ${chat.name}`);
-                    // console.log("ContactsScreen (Voice Command): Navigating to Chat with:", {
-                    //     _id: chat._id,
-                    //     name: chat.name,
-                    //     participant1Id: chat.participant1Id, // Crucial
-                    //     participant2Id: chat.participant2Id, // Crucial
-                    //     image: chat.image,
-                    //     lastMessage: chat.lastMessage,
-                    //     time: chat.time,
-                    //     unread: chat.unread
-                    // });
                     navigation.navigate('Chat', {
                         contact: {
                             _id: chat._id, // Use chat ID as contact ID for consistency
@@ -179,7 +165,7 @@ useEffect(() => {
             </SafeAreaView>
         );
     }
-
+    
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.headerBar}>

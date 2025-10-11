@@ -1,62 +1,137 @@
 const express = require('express');
-const { MongoClient, ObjectId } = require('mongodb'); // Ensure ObjectId is imported
+const { MongoClient, ObjectId } = require('mongodb');
 const cors = require('cors');
 require('dotenv').config();
 
-// --- Server Setup ---
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// --- Database Connection Details ---
 const uri = process.env.MONGO_URI;
 const client = new MongoClient(uri);
 
-// Declare database and collections globally
 let database;
 let chatsCollection;
 let messagesCollection;
-let contactsCollection; // Assuming you have a contacts collection too
+let contactsCollection;
+let usersCollection;
 
-// --- Connect to MongoDB once when the server starts ---
 async function connectToMongo() {
     try {
         await client.connect();
         console.log("MongoDB connected successfully!");
 
-        // Assign database and collections AFTER connection is established
         database = client.db('echobridge');
         chatsCollection = database.collection('chats');
         messagesCollection = database.collection('messages');
-        contactsCollection = database.collection('contact'); // Assuming this exists
+        contactsCollection = database.collection('contact');
+        usersCollection = database.collection('users');
 
     } catch (error) {
         console.error("🔥 Could not connect to MongoDB:", error);
-        // Exit the process if we can't connect to the DB
         process.exit(1);
     }
 }
 
-
-// --- Route Handlers ---
-
-app.get('/contact', async (req, res) => {
-    console.log('Request received for /contact');
+app.post('/signup', async (req, res) => {
+    console.log('Request received for /signup (POST)');
     try {
-        if (!contactsCollection) {
+        if (!usersCollection) {
             return res.status(500).json({ message: "Database not fully initialized." });
         }
-        const contacts = await contactsCollection.find({}).toArray();
-        res.json(contacts);
+        // Destructure username along with email and password
+        const { username, email, password } = req.body;
+
+        // Check if all required fields are present for signup
+        if (!username || !email || !password) {
+            return res.status(400).json({ message: "Username, email, and password are required for signup." });
+        }
+
+        // Check if a user with that email already exists
+        const existingUserByEmail = await usersCollection.findOne({ email });
+        if (existingUserByEmail) {
+            return res.status(409).json({ message: "User with that email already exists." });
+        }
+
+        // Optional: Check if a user with that username already exists (if usernames must be unique)
+        const existingUserByUsername = await usersCollection.findOne({ username });
+        if (existingUserByUsername) {
+            return res.status(409).json({ message: "User with that username already exists." });
+        }
+
+        // In a real app, hash the password here before saving!
+        // const hashedPassword = await bcrypt.hash(password, 10);
+
+        const newUser = {
+            username: username, // Store the username
+            email: email,
+            password: password,
+            createdAt: new Date(),
+        };
+
+        const result = await usersCollection.insertOne(newUser);
+        // Return username and email (but not password)
+        const createdUser = { _id: result.insertedId, username: newUser.username, email: newUser.email };
+
+        console.log(`User signed up: ${createdUser.email} (username: ${createdUser.username})`);
+        res.status(201).json({ message: "User registered successfully.", user: createdUser });
+
     } catch (error) {
-        console.error("🔥 An error occurred fetching contacts:", error);
-        res.status(500).json({ message: "Error fetching data from database." });
+        console.error("🔥 An error occurred during signup:", error);
+        res.status(500).json({ message: "Error during user registration." });
     }
 });
 
+app.post('/login', async (req, res) => {
+    console.log('Request received for /login (POST)');
+    try {
+        if (!usersCollection) {
+            return res.status(500).json({ message: "Database not fully initialized." });
+        }
+        const { username, password } = req.body;
+
+        if (!username || !password) {
+            return res.status(400).json({ message: "Username and password are required for login." });
+        }
+
+        const user = await usersCollection.findOne({ username });
+        if (!user) {
+            return res.status(401).json({ message: "Invalid credentials." });
+        }
+
+        const isPasswordValid = (password === user.password);
+
+        if (!isPasswordValid) {
+            return res.status(401).json({ message: "Invalid credentials." });
+        }
+
+        // Successful login - include username in the response
+        const loggedInUser = { _id: user._id, username: user.username, email: user.email };
+
+        console.log(`User logged in: ${loggedInUser.email} (username: ${loggedInUser.username})`);
+        res.status(200).json({ message: "Login successful.", user: loggedInUser });
+
+    } catch (error) {
+        console.error("🔥 An error occurred during login:", error);
+        res.status(500).json({ message: "Error during user login." });
+    }
+});
+
+// app.get('/contact', async (req, res) => {
+//     console.log('Request received for /contact');
+//     try {
+//         if (!contactsCollection) {
+//             return res.status(500).json({ message: "Database not fully initialized." });
+//         }
+//         const contacts = await contactsCollection.find({}).toArray();
+//         res.json(contacts);
+//     } catch (error) {
+//         console.error("🔥 An error occurred fetching contacts:", error);
+//         res.status(500).json({ message: "Error fetching data from database." });
+//     }
+// });
 
 app.get('/chats', async (req, res) => {
     console.log('Request received for /chats');
@@ -65,13 +140,20 @@ app.get('/chats', async (req, res) => {
             return res.status(500).json({ message: "Database not fully initialized." });
         }
         const chats = await chatsCollection.find({}).toArray();
-        res.json(chats);
+
+        // Map over the chats to convert _id from ObjectId to string
+        const formattedChats = chats.map(chat => ({
+            ...chat, // Keep all existing properties
+            _id: chat._id.toString(), // Convert the chat's _id to a string
+        }));
+
+        console.log('DEBUG: Sending formatted chats to frontend:', formattedChats);
+        res.json(formattedChats);
     } catch (error) {
         console.error("🔥 An error occurred fetching chats:", error);
         res.status(500).json({ message: "Error fetching chats from database." });
     }
 });
-
 
 app.post('/chats', async (req, res) => {
     console.log('Request received for /chats (POST)');
@@ -81,20 +163,12 @@ app.post('/chats', async (req, res) => {
         }
         const { partnerId, partnerName, partnerImage, senderId, senderName } = req.body;
 
-        // console.log("Backend POST /chats received data:");
-        // console.log("  senderId:", senderId);
-        // console.log("  partnerId:", partnerId);
-        // console.log("  partnerName:", partnerName);
-        // console.log("  senderName:", senderName);
-        // --- END Backend POST /chats received data: ---
-
-        // Added a check for senderName, as it's used in the newChat object
         if (!partnerId || !partnerName || !senderId || !senderName) {
             console.error("Missing fields for chat creation:", req.body);
             return res.status(400).json({ message: "Missing required chat creation fields." });
         }
 
-        // Check for existing chat between these two participants (order-independent)
+        // The existing chat check already uses participant1Id and participant2Id
         const existingChat = await chatsCollection.findOne({
             $or: [
                 { participant1Id: senderId, participant2Id: partnerId },
@@ -103,15 +177,14 @@ app.post('/chats', async (req, res) => {
         });
 
         if (existingChat) {
-            // console.log("Backend POST /chats - Chat already exists. Returning existing chat:", existingChat);
             return res.status(200).json({ message: "Chat already exists.", chat: existingChat });
         }
 
-        // If no existing chat, create a new one
+        // *** THIS IS WHERE THE FIELDS NEED TO BE ADDED TO THE DOCUMENT ***
         const newChat = {
-            participant1Id: senderId,
-            participant2Id: partnerId,
-            name: partnerName, // The name of the person THIS user is chatting with
+            participant1Id: senderId, // <--- These are correctly assigned here
+            participant2Id: partnerId, // <--- These are correctly assigned here
+            name: partnerName, // This 'name' is for the *other* participant's name for display in the list
             image: partnerImage || 'profileDemo.jpg',
             lastMessage: 'Say hello to start the conversation!',
             time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
@@ -122,10 +195,6 @@ app.post('/chats', async (req, res) => {
 
         const result = await chatsCollection.insertOne(newChat);
         const createdChat = { _id: result.insertedId, ...newChat };
-
-        // --- LOG THE CREATED CHAT OBJECT BEFORE SENDING RESPONSE (Debugging Log) ---
-        // console.log("Backend POST /chats - createdChat object before sending response:", createdChat);
-
         res.status(201).json({ message: "Chat created successfully.", chat: createdChat });
 
     } catch (error) {
@@ -133,7 +202,6 @@ app.post('/chats', async (req, res) => {
         res.status(500).json({ message: "Error creating chat in database." });
     }
 });
-
 
 app.get('/chats/:chatId/messages', async (req, res) => {
     console.log(`Request received for /chats/${req.params.chatId}/messages`);
@@ -149,7 +217,6 @@ app.get('/chats/:chatId/messages', async (req, res) => {
         res.status(500).json({ message: "Error fetching messages from database." });
     }
 });
-
 
 app.post('/chats/:chatId/messages', async (req, res) => {
     console.log(`Request received for /chats/${req.params.chatId}/messages (POST)`);
@@ -169,13 +236,12 @@ app.post('/chats/:chatId/messages', async (req, res) => {
             senderId: senderId,
             text: text,
             createdAt: new Date(),
-            read: false, // Messages are initially unread by the recipient
+            read: false,
         };
 
         const result = await messagesCollection.insertOne(newMessage);
         const createdMessage = { _id: result.insertedId, ...newMessage };
 
-        // Update the lastMessage and time in the associated chat
         await chatsCollection.updateOne(
             { _id: chatId },
             {
@@ -195,7 +261,6 @@ app.post('/chats/:chatId/messages', async (req, res) => {
     }
 });
 
-
 app.put('/chats/:chatId/messages/read', async (req, res) => {
     console.log(`Request received for /chats/${req.params.chatId}/messages/read (PUT)`);
     try {
@@ -203,18 +268,17 @@ app.put('/chats/:chatId/messages/read', async (req, res) => {
             return res.status(500).json({ message: "Database not fully initialized." });
         }
         const chatId = new ObjectId(req.params.chatId);
-        const { readerId } = req.body; // The ID of the user who is marking messages as read
+        const { readerId } = req.body;
 
         if (!readerId) {
             return res.status(400).json({ message: "Missing readerId for marking messages as read." });
         }
 
-        // Mark all messages in this chat as read, *except* those sent by the readerId itself
         const updateResult = await messagesCollection.updateMany(
             {
                 chatId: chatId,
-                senderId: { $ne: readerId }, // Do not mark messages sent by the reader as unread
-                read: false // Only mark unread messages
+                senderId: { $ne: readerId },
+                read: false
             },
             {
                 $set: { read: true }
@@ -229,15 +293,12 @@ app.put('/chats/:chatId/messages/read', async (req, res) => {
     }
 });
 
-// --- Start the Server ---
-// Call connectToMongo() ONCE, and then start the server in its .then() block
 connectToMongo().then(() => {
     app.listen(PORT, () => {
         console.log(`🚀 Server is running on http://10.180.131.188:${PORT}`);
     });
 });
 
-// Handle graceful shutdown to close MongoDB connection
 process.on('SIGINT', async () => {
     console.log('Shutting down server...');
     await client.close();

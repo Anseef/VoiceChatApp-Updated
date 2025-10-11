@@ -18,7 +18,7 @@ const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.180.131.188:3001';
 const AddChatScreen = () => {
     const navigation = useNavigation();
     const isFocused = useIsFocused();
-    const { isAccessibilityMode } = useAppContext();
+    const { isAccessibilityMode,currentUser } = useAppContext();
     const { status, recognizedText, error, startListening, setRecognizedText, stopListening } = useVoiceRecognition();
 
     const [phoneContacts, setPhoneContacts] = useState([]);
@@ -26,8 +26,8 @@ const AddChatScreen = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [fetchError, setFetchError] = useState(null);
     
-    const currentUserId = "yato";
-    const currentUserName = "You";
+    const currentUserId = currentUser?._id;
+    const currentUserName = currentUser?.username;
 
     const speakingActive = useRef(false);
     const hasSpokenGreeting = useRef(false); // <-- SOLUTION 1: Flag to prevent greeting loop

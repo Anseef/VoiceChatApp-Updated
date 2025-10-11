@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import * as Speech from 'expo-speech';
 import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
-import { useAppContext } from '../context/AppContext';
+import { useAppContext } from '../context/AppContext'; // Ensure this path is correct
 import { FontAwesome } from "@expo/vector-icons";
 import { useHeaderHeight } from '@react-navigation/elements';
 import { imageMap } from '../utils/imageMap';
@@ -14,14 +14,17 @@ import { imageMap } from '../utils/imageMap';
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.180.131.188:3001';
 
 const ChatScreen = ({ route, navigation }) => {
-  const { conversations, setConversations, isAccessibilityMode } = useAppContext();
+  // Destructure currentUser from useAppContext
+  const { conversations, setConversations, isAccessibilityMode, currentUser } = useAppContext();
   const contact = route?.params?.contact;
   const headerHeight = useHeaderHeight();
   const flatListRef = useRef(null);
 
   const [isLoadingMessages, setIsLoadingMessages] = useState(true);
   const [messageFetchError, setMessageFetchError] = useState(null);
-  const currentUserId = "yato";
+
+  // Use the actual current user's ID
+  const currentUserId = currentUser?._id; // Access currentUser from context
 
   if (!contact) {
     useEffect(() => { navigation.goBack(); }, [navigation]);
@@ -41,7 +44,9 @@ const ChatScreen = ({ route, navigation }) => {
   // ✅ Fetch messages from DB
   useEffect(() => {
     const fetchMessages = async () => {
-      if (!chatId) {
+      // Ensure we have a chatId and currentUserId before fetching
+      if (!chatId || !currentUserId) {
+        console.warn("ChatScreen: Missing chatId or currentUserId. Skipping message fetch.");
         setIsLoadingMessages(false);
         return;
       }
@@ -54,10 +59,11 @@ const ChatScreen = ({ route, navigation }) => {
 
         setConversations(prev => ({ ...prev, [contact.name]: data }));
 
+        // Mark messages as read by the current user
         await fetch(`${API_URL}/chats/${chatId}/messages/read`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ readerId: currentUserId })
+          body: JSON.stringify({ readerId: currentUserId }) // Use currentUserId here
         });
       } catch (err) {
         setMessageFetchError(err.message);
@@ -68,7 +74,7 @@ const ChatScreen = ({ route, navigation }) => {
     };
 
     fetchMessages();
-  }, [chatId, contact.name, setConversations]);
+  }, [chatId, currentUserId, contact.name, setConversations]); // Add currentUserId to dependency array
 
   useEffect(() => {
     setMessages(conversations[contact.name] || []);
@@ -79,16 +85,18 @@ const ChatScreen = ({ route, navigation }) => {
   }, [messages]);
 
   useEffect(() => {
-    setMessages(conversations[contact.name] || []);
-  },[conversations[contact.name]]);
+    // This useEffect is redundant with the previous one, you can combine or remove this.
+    // setMessages(conversations[contact.name] || []);
+  }, [conversations[contact.name]]);
 
   useEffect(() => {
     if (!isAccessibilityMode || isLoadingMessages) return;
 
     Speech.stop();
     const currentMsgs = conversations[contact.name] || [];
+    // Filter by actual senderId not equal to currentUserId
     const unreadMsgs = currentMsgs.filter(
-      m => !m.read && m.sender !== 'user' && m.senderId !== currentUserId
+      m => !m.read && m.senderId !== currentUserId
     );
 
     let speechOutput = '';
@@ -106,79 +114,95 @@ const ChatScreen = ({ route, navigation }) => {
     });
 
     // Mark as read
-    const updatedMsgs = currentMsgs.map(m => ({ ...m, read: true }));
-    setConversations(prev => ({ ...prev, [contact.name]: updatedMsgs }));
-  }, [isAccessibilityMode, isLoadingMessages]);
+    // The PUT request handles marking as read on the backend, which will then refetch messages
+    // This local update is only for immediate UI feedback if needed, but not strictly necessary
+    // after the PUT request has been sent and subsequent fetch.
+    // const updatedMsgs = currentMsgs.map(m => ({ ...m, read: true }));
+    // setConversations(prev => ({ ...prev, [contact.name]: updatedMsgs }));
+  }, [isAccessibilityMode, isLoadingMessages, conversations, contact.name, currentUserId, startListening]);
 
-const sendMessage = useCallback(async (text, sender = 'user') => {
-  if (!text.trim()) return;
+
+const sendMessage = useCallback(async (text, senderName) => { // Renamed sender to senderName for clarity
+  if (!text.trim() || !chatId || !currentUserId) { // Ensure currentUserId exists
+      console.warn("Cannot send message: Missing text, chatId, or currentUserId.");
+      return;
+  }
 
   const newMessage = {
-    id: Date.now().toString(),
+    id: Date.now().toString(), // Client-side ID for immediate display
     text,
-    sender,
-    read: sender === 'user',
-    senderId: sender === 'user' ? currentUserId : contact._id,
+    sender: senderName, // This `sender` field is for UI display (e.g., 'user' or contact.name)
+    read: senderName === 'user',
+    senderId: senderName === 'user' ? currentUserId : contact._id, // This is the ID stored in DB
     timestamp: new Date().toISOString(),
   };
 
-  // Update locally
+  // Optimistic UI update: Add message locally first
   const updatedMessages = [...(conversations[contact.name] || []), newMessage];
   setConversations(prev => ({ ...prev, [contact.name]: updatedMessages }));
-  if (sender === 'user') setTextInput('');
+  if (senderName === 'user') setTextInput('');
 
   try {
-    await fetch(`${API_URL}/chats/${chatId}/messages`, {
+    const response = await fetch(`${API_URL}/chats/${chatId}/messages`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        chatId: chatId,
         senderId: newMessage.senderId,
         text: newMessage.text,
-        timestamp: newMessage.timestamp,
+        createdAt: newMessage.timestamp, // Backend expects createdAt
       }),
     });
+
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to send message to database.");
+    }
+    // Optionally refetch messages after successful send to get the server-assigned _id and exact timestamp
+    // Or just rely on the optimistic update for now. For simplicity, we'll keep it optimistic.
   } catch (err) {
     console.error('Error saving message to DB:', err);
+    Alert.alert("Error", `Failed to send message: ${err.message}`);
+    // Revert optimistic update if send fails, or show error state for this message
   }
 }, [conversations, contact.name, setConversations, chatId, currentUserId, contact._id]);
 
 
   // ✅ Handle voice commands cleanly
   useEffect(() => {
-  if (!isAccessibilityMode || status !== 'idle' || !recognizedText) return;
+    if (!isAccessibilityMode || status !== 'idle' || !recognizedText) return;
 
-  const lower = recognizedText.toLowerCase().trim();
-  if (!lower) return setRecognizedText('');
+    const lower = recognizedText.toLowerCase().trim();
+    if (!lower) return setRecognizedText('');
 
-  Speech.stop();
+    Speech.stop();
 
-  if (lower.includes('exit chat') || lower.includes('go back')) {
-    Speech.speak("Exiting chat.", { onDone: () => navigation.goBack() });
-    setRecognizedText('');
-    return;
-  }
-
-  // Send user message
-  sendMessage(recognizedText, 'user');
-  Speech.speak(`You said: ${recognizedText}`, {
-    onDone: () => {
-      setTimeout(() => {
-        const replyText = `This is a simulated reply.`;
-        sendMessage(replyText, contact.name);
-
-        // Speak the reply, then start listening again silently
-        Speech.speak(`New message from ${contact.name}: ${replyText}`, {
-          onDone: () => {
-            // Start listening again WITHOUT repeating "Say your message..."
-            setTimeout(() => startListening(), 500);
-          }
-        });
-      }, 1000);
+    if (lower.includes('exit chat') || lower.includes('go back')) {
+      Speech.speak("Exiting chat.", { onDone: () => navigation.goBack() });
+      setRecognizedText('');
+      return;
     }
-  });
 
-  setRecognizedText('');
-}, [recognizedText, status, isAccessibilityMode]);
+    // Send user message
+    sendMessage(recognizedText, 'user');
+    Speech.speak(`You said: ${recognizedText}`, {
+      onDone: () => {
+        setTimeout(() => {
+          const replyText = `This is a simulated reply.`;
+          sendMessage(replyText, contact.name);
+
+          // Speak the reply, then start listening again silently
+          Speech.speak(`New message from ${contact.name}: ${replyText}`, {
+            onDone: () => {
+              setTimeout(() => startListening(), 500);
+            }
+          });
+        }, 1000);
+      }
+    });
+
+    setRecognizedText('');
+  }, [recognizedText, status, isAccessibilityMode, sendMessage, contact.name, navigation, startListening, setRecognizedText]); // Added sendMessage to deps
 
   const handleUserSendMessage = (text) => {
     if (!text.trim()) return;
@@ -194,6 +218,18 @@ const sendMessage = useCallback(async (text, sender = 'user') => {
       <SafeAreaView style={styles.errorContainer}>
         <ActivityIndicator size="large" color="#586eeb" />
         <Text style={{ marginTop: 10 }}>Loading Messages...</Text>
+      </SafeAreaView>
+    );
+  }
+
+  // Handle case where currentUserId is not available (e.g., not logged in)
+  if (!currentUserId) {
+    return (
+      <SafeAreaView style={styles.errorContainer}>
+        <Text style={styles.errorText}>User not logged in. Please log in to view chats.</Text>
+        <TouchableOpacity onPress={() => navigation.navigate('Auth')}>
+            <Text style={styles.loginLink}>Go to Login</Text>
+        </TouchableOpacity>
       </SafeAreaView>
     );
   }
@@ -224,7 +260,7 @@ const sendMessage = useCallback(async (text, sender = 'user') => {
           renderItem={({ item }) => (
             <View style={[
               styles.messageBubble,
-              item.sender === 'user' || item.senderId === currentUserId
+              item.sender === 'user' || item.senderId === currentUserId // Use currentUserId for sender check
                 ? styles.userMessage
                 : styles.contactMessage
             ]}>
@@ -292,6 +328,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#586eeb', justifyContent: 'center',
     alignItems: 'center', marginLeft: 8
   },
+  errorText: {
+    color: 'red',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  loginLink: {
+    color: '#586eeb',
+    fontSize: 16,
+    fontWeight: 'bold',
+  }
 });
 
 export default ChatScreen;
