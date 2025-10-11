@@ -70,26 +70,35 @@ const ContactsScreen = ({ navigation }) => {
     }, [isFocused]);
 
     // --- Original useEffect for accessibility mode greetings and listening ---
-    useEffect(() => {
-        if (isFocused && isAccessibilityMode) {
-            if (isLoading) {
-                return; // Wait for chats to load before speaking commands
-            }
+useEffect(() => {
+  if (isFocused && isAccessibilityMode) {
+    if (isLoading) return;
 
-            if (fetchError) {
-                Speech.speak(`There was an error loading your chats: ${fetchError}`);
-                return;
-            }
-            let message;
-            if (!hasVisited.current) {
-                message = "Welcome to your active chats. Say 'Chat with' and a name, 'add new chat', 'go to profile', or 'log out'.";
-                hasVisited.current = true;
-            } else {
-                message = "You are on the chats screen. To open a chat, say 'chat with' and the person's name.";
-            }
-            Speech.speak(message, { onDone: startListening });
-        }
-    }, [isFocused, isLoading, fetchError, isAccessibilityMode, startListening]);
+    if (fetchError) {
+      Speech.stop(); // stop previous speech if any
+      Speech.speak(`There was an error loading your chats: ${fetchError}`);
+      return;
+    }
+
+    let message;
+    if (!hasVisited.current) {
+      message = "Welcome to your active chats. Say 'Chat with' and a name, 'add new chat', 'go to profile', or 'log out'.";
+      hasVisited.current = true;
+    } else {
+      message = "You are on the chats screen. To open a chat, say 'chat with' and the person's name.";
+    }
+
+    // 🛑 Stop overlapping speech before speaking new message
+    Speech.stop();
+    Speech.speak(message, { onDone: startListening });
+  }
+
+  // 🧹 Cleanup when screen is unfocused
+  return () => {
+    Speech.stop();
+  };
+}, [isFocused, isLoading, fetchError, isAccessibilityMode]);
+
 
     // --- Original useEffect for voice command processing ---
     useEffect(() => {
@@ -108,6 +117,7 @@ const ContactsScreen = ({ navigation }) => {
             Speech.speak("Opening new chat screen to add a person.", { onDone: () => navigation.navigate('AddChat') });
         } else {
             const match = lowerCaseText.match(/chat with (.*)/);
+            console.log(match);
 
             if (match && match[1]) {
                 let capturedName = match[1].trim();
@@ -149,7 +159,7 @@ const ContactsScreen = ({ navigation }) => {
             }
         }
         setRecognizedText('');
-    }, [recognizedText, status, activeChats, isAccessibilityMode, isFocused, startListening, navigation, setIsAuthenticated]);
+    }, [recognizedText, status, activeChats, isAccessibilityMode, isFocused, navigation, setIsAuthenticated]);
 
 
     if (isLoading) {

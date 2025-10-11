@@ -5,8 +5,8 @@ const AppContext = createContext();
 
 export const AppProvider = ({ children }) => {
     // Hardcode isAuthenticated to true since we're bypassing login
-    const [isAuthenticated, setIsAuthenticated] = useState(true); // <--- CHANGED
-    const [isAccessibilityMode, setAccessibilityMode] = useState(false);
+    const [isAuthenticated, setIsAuthenticated] = useState(false); // <--- CHANGED
+    const [isAccessibilityMode, setAccessibilityMode] = useState(true);
     const [contacts, setContacts] = useState([]); // This will be used by AddChatScreen
     const [conversations, setConversations] = useState({}); // Local state for simulated replies (might be fully replaced by DB in ChatScreen)
 
