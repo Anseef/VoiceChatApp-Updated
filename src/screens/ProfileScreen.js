@@ -1,4 +1,4 @@
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
 import { useIsFocused } from '@react-navigation/native';
 import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { useAppContext } from '../context/AppContext';
@@ -17,50 +17,67 @@ const LogoutIcon = ({ color = '#000', size = 24 }) => (
 );
 
 const ProfileScreen = ({ navigation }) => {
-    const { isAccessibilityMode, setIsAuthenticated, currentUser } = useAppContext();
-    const { status, recognizedText, error, startListening, setRecognizedText } = useVoiceRecognition();
     const isFocused = useIsFocused();
+    const { isAccessibilityMode, setIsAuthenticated, currentUser } = useAppContext();
+    const { status, recognizedText, startListening, setRecognizedText } = useVoiceRecognition();
+
+    const hasSpokenOnce = useRef(false);
 
     const handleLogout = useCallback(() => setIsAuthenticated(false), [setIsAuthenticated]);
 
-    // ✅ This hook now correctly waits for the screen to be focused AND in accessibility mode.
+    // ✅ Always speak on first mount + whenever screen is focused again
     useEffect(() => {
-        if (isFocused && isAccessibilityMode) {
-            Speech.speak(
-                "You are on the profile screen. Say 'go to chats', 'go to settings', 'go to help center', or 'log out'.",
-                { onDone: startListening }
-            );
+        if (!isAccessibilityMode) return;
+
+        // First mount
+        if (!hasSpokenOnce.current) {
+            hasSpokenOnce.current = true;
+            setTimeout(() => {
+                Speech.speak(
+                    "You are on the profile screen. Say 'go to home', 'go to settings', 'go to help center', or 'log out'.",
+                    { onDone: startListening }
+                );
+            }, 400);
         }
-        // Cleanup function to stop speech when the screen loses focus
+
+        // Every time user refocuses on screen
+        if (isFocused) {
+            setTimeout(() => {
+                Speech.speak(
+                    "You are on the profile screen. Say 'go to home', 'go to settings', 'go to help center', or 'log out'.",
+                    { onDone: startListening }
+                );
+            }, 300);
+        } else {
+            Speech.stop();
+        }
+
         return () => {
             Speech.stop();
         };
-    }, [isAccessibilityMode, isFocused]);
+    }, [isFocused, isAccessibilityMode]);
 
-    // ✅ This hook processes the voice commands, also gated by the same reliable conditions.
+    // ✅ Voice command handling stays the same
     useEffect(() => {
-        // Guard clause: Do nothing if the screen is not focused or not in accessibility mode.
         if (!isFocused || !isAccessibilityMode) return;
-        // Guard clause: Only proceed if there is a new, recognized command.
         if (status !== 'idle' || !recognizedText) return;
 
-        const lowerCaseText = recognizedText.toLowerCase();
+        const lower = recognizedText.toLowerCase();
 
-        if (lowerCaseText.includes('go to chatscreen') || lowerCaseText.includes('go back')) {
+        if (lower.includes('go to home') || lower.includes('go back')) {
             Speech.speak("Navigating to chats.", { onDone: () => navigation.navigate('Chats') });
-        } else if (lowerCaseText.includes('go to settings')) {
+        } else if (lower.includes('go to settings')) {
             Speech.speak("Navigating to settings.", { onDone: () => console.log('Navigate to Settings') });
-        } else if (lowerCaseText.includes('go to help center')) {
+        } else if (lower.includes('go to help center')) {
             Speech.speak("Navigating to help center.", { onDone: () => console.log('Navigate to Help Center') });
-        } else if (lowerCaseText.includes('log out')) {
+        } else if (lower.includes('log out')) {
             Speech.speak("Logging you out. Goodbye!", { onDone: handleLogout });
         } else {
             Speech.speak("Sorry, I didn't understand that command. Please try again.", { onDone: startListening });
         }
 
-        setRecognizedText(''); // Reset the text after processing
-    }, [recognizedText, status, isAccessibilityMode, isFocused, navigation, startListening, handleLogout, setRecognizedText]);
-
+        setRecognizedText('');
+    }, [recognizedText, status, isFocused, isAccessibilityMode, navigation, startListening, handleLogout, setRecognizedText]);
 
     const ProfileOption = ({ icon, text, onPress }) => (
         <TouchableOpacity style={styles.optionRow} onPress={onPress}>
@@ -85,21 +102,9 @@ const ProfileScreen = ({ navigation }) => {
             </View>
 
             <View style={styles.optionsContainer}>
-                <ProfileOption
-                    icon={<SettingsIcon />}
-                    text="Settings"
-                    onPress={() => console.log('Settings Pressed (Manual)')}
-                />
-                <ProfileOption
-                    icon={<HelpIcon />}
-                    text="Help center"
-                    onPress={() => console.log('Help center Pressed (Manual)')}
-                />
-                <ProfileOption
-                    icon={<LogoutIcon />}
-                    text="Log out"
-                    onPress={handleLogout}
-                />
+                <ProfileOption icon={<SettingsIcon />} text="Settings" onPress={() => console.log('Settings pressed')} />
+                <ProfileOption icon={<HelpIcon />} text="Help center" onPress={() => console.log('Help pressed')} />
+                <ProfileOption icon={<LogoutIcon />} text="Log out" onPress={handleLogout} />
             </View>
         </SafeAreaView>
     );
@@ -107,12 +112,7 @@ const ProfileScreen = ({ navigation }) => {
 
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff' },
-    headerBar: {
-        paddingHorizontal: 20,
-        paddingTop: 50,
-        paddingBottom: 15,
-        backgroundColor: '#fff'
-    },
+    headerBar: { paddingHorizontal: 20, paddingTop: 50, paddingBottom: 15, backgroundColor: '#fff' },
     headerTitle: { fontSize: 32, fontWeight: 'bold' },
     profileCard: {
         flexDirection: 'row',
@@ -121,16 +121,10 @@ const styles = StyleSheet.create({
         borderBottomWidth: 1,
         borderBottomColor: '#f0f0f0'
     },
-    profileAvatar: {
-        width: 60,
-        height: 60,
-        borderRadius: 30,
-        marginRight: 15,
-    },
+    profileAvatar: { width: 60, height: 60, borderRadius: 30, marginRight: 15 },
     profileInfo: { flex: 1 },
     profileName: { fontSize: 18, fontWeight: 'bold' },
     profileEmail: { fontSize: 14, color: '#8A8A8E', marginTop: 4 },
-    threeDots: { fontSize: 24, fontWeight: 'bold', color: '#8A8A8E' },
     optionsContainer: { marginTop: 20, paddingHorizontal: 20 },
     optionRow: {
         flexDirection: 'row',
