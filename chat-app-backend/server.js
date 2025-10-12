@@ -293,6 +293,46 @@ app.put('/chats/:chatId/messages/read', async (req, res) => {
     }
 });
 
+// CORRECT LOGIC - In your server file
+
+app.delete('/chats/:chatId/messages/last/:userId', async (req, res) => {
+    try {
+        if (!messagesCollection) {
+            return res.status(500).json({ message: "Database not fully initialized." });
+        }
+
+        const { chatId, userId } = req.params;
+        const chatObjectId = new ObjectId(chatId);
+
+        // Step 1: Find the single, most recent message from the user in this chat.
+        const lastMessage = await messagesCollection.findOne(
+            { chatId: chatObjectId, senderId: userId },
+            { sort: { createdAt: -1 } }
+        );
+
+        if (!lastMessage) {
+            return res.status(404).json({ message: "No message found from this user to delete." });
+        }
+
+        // Step 2: Delete ONLY that one message using its unique _id.
+        const deleteResult = await messagesCollection.deleteOne({ _id: lastMessage._id });
+
+        if (deleteResult.deletedCount === 0) {
+            return res.status(500).json({ message: "Error: Failed to delete the message from the database." });
+        }
+
+        // Step 3: Respond with the ID of the successfully deleted message.
+        res.status(200).json({
+            message: "Last message deleted successfully.",
+            deletedMessageId: lastMessage._id
+        });
+
+    } catch (error) {
+        console.error("🔥 Error deleting last message:", error);
+        res.status(500).json({ message: "Failed to delete message.", error: error.message });
+    }
+});
+
 connectToMongo().then(() => {
     app.listen(PORT, () => {
         console.log(`🚀 Server is running on http://10.180.131.188:${PORT}`);

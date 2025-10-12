@@ -86,7 +86,7 @@ export const useVoiceRecognition = () => {
       const payload = {
         contents: [{ 
           parts: [
-            { text: "Transcribe this audio." },
+            {text: "Transcribe this voice command accurately. The speaker has an Indian English accent and is navigating a mobile app." },
             { inlineData: { mimeType: 'audio/mp4', data: base64Audio } }
           ] 
         }],

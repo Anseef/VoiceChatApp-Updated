@@ -1,11 +1,11 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
+import { useIsFocused } from '@react-navigation/native';
 import { SafeAreaView, View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
 import { useAppContext } from '../context/AppContext';
 import { FontAwesome } from "@expo/vector-icons";
-import { useVoiceRecognition } from '../hooks/useVoiceRecognition'; // Import your voice recognition hook
-import * as Speech from 'expo-speech'; // Import Speech for responses
+import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
+import * as Speech from 'expo-speech';
 
-// --- Icon Components (unchanged from your last request) ---
 const SettingsIcon = ({ color = '#000', size = 24 }) => (
     <FontAwesome name="cog" size={size} color={color} />
 );
@@ -15,50 +15,52 @@ const HelpIcon = ({ color = '#000', size = 24 }) => (
 const LogoutIcon = ({ color = '#000', size = 24 }) => (
     <FontAwesome name="sign-out" size={size} color={color} />
 );
-// -----------------------------------------------------------
 
-// --- ProfileScreen Component ---
-const ProfileScreen = ({ navigation }) => { // Ensure navigation prop is received
+const ProfileScreen = ({ navigation }) => {
     const { isAccessibilityMode, setIsAuthenticated, currentUser } = useAppContext();
-    const handleLogout = () => setIsAuthenticated(false);
-
-    // Initialize voice recognition
     const { status, recognizedText, error, startListening, setRecognizedText } = useVoiceRecognition();
+    const isFocused = useIsFocused();
 
-    // Effect for when the screen gains focus in accessibility mode
+    const handleLogout = useCallback(() => setIsAuthenticated(false), [setIsAuthenticated]);
+
+    // ✅ This hook now correctly waits for the screen to be focused AND in accessibility mode.
     useEffect(() => {
-        const onFocus = () => {
-            if (isAccessibilityMode) {
-                Speech.speak(
-                    "You are on the profile screen. Say 'go to chats', 'go to settings', 'go to help center', or 'log out'.",
-                    { onDone: startListening }
-                );
-            }
+        if (isFocused && isAccessibilityMode) {
+            Speech.speak(
+                "You are on the profile screen. Say 'go to chats', 'go to settings', 'go to help center', or 'log out'.",
+                { onDone: startListening }
+            );
+        }
+        // Cleanup function to stop speech when the screen loses focus
+        return () => {
+            Speech.stop();
         };
-        const unsubscribe = navigation.addListener('focus', onFocus);
-        return unsubscribe;
-    }, [navigation, isAccessibilityMode, startListening]); // Added startListening to dependencies
+    }, [isAccessibilityMode, isFocused]);
 
-    // Effect to process recognized voice commands
+    // ✅ This hook processes the voice commands, also gated by the same reliable conditions.
     useEffect(() => {
-        if (!isAccessibilityMode || status !== 'idle' || !recognizedText) return;
+        // Guard clause: Do nothing if the screen is not focused or not in accessibility mode.
+        if (!isFocused || !isAccessibilityMode) return;
+        // Guard clause: Only proceed if there is a new, recognized command.
+        if (status !== 'idle' || !recognizedText) return;
 
         const lowerCaseText = recognizedText.toLowerCase();
 
-        if (lowerCaseText.includes('go to chats') || lowerCaseText.includes('go to homepage')) {
-            Speech.speak("Navigating to chats.", { onDone: () => navigation.navigate('Chats') }); // Assuming 'HomeTabs' is your main contacts/chats screen
+        if (lowerCaseText.includes('go to chatscreen') || lowerCaseText.includes('go back')) {
+            Speech.speak("Navigating to chats.", { onDone: () => navigation.navigate('Chats') });
         } else if (lowerCaseText.includes('go to settings')) {
-            Speech.speak("Navigating to settings.", { onDone: () => console.log('Navigate to Settings') }); // Implement actual navigation if you have a Settings screen
+            Speech.speak("Navigating to settings.", { onDone: () => console.log('Navigate to Settings') });
         } else if (lowerCaseText.includes('go to help center')) {
-            Speech.speak("Navigating to help center.", { onDone: () => console.log('Navigate to Help Center') }); // Implement actual navigation
+            Speech.speak("Navigating to help center.", { onDone: () => console.log('Navigate to Help Center') });
         } else if (lowerCaseText.includes('log out')) {
             Speech.speak("Logging you out. Goodbye!", { onDone: handleLogout });
         } else {
-            Speech.speak("Sorry, I didn't understand that command on the profile screen. Please try again.", { onDone: startListening });
+            Speech.speak("Sorry, I didn't understand that command. Please try again.", { onDone: startListening });
         }
 
-        setRecognizedText(''); // Clear recognized text after processing
-    }, [recognizedText, status, isAccessibilityMode, navigation, startListening, handleLogout]); // Added dependencies
+        setRecognizedText(''); // Reset the text after processing
+    }, [recognizedText, status, isAccessibilityMode, isFocused, navigation, startListening, handleLogout, setRecognizedText]);
+
 
     const ProfileOption = ({ icon, text, onPress }) => (
         <TouchableOpacity style={styles.optionRow} onPress={onPress}>
@@ -70,34 +72,28 @@ const ProfileScreen = ({ navigation }) => { // Ensure navigation prop is receive
 
     return (
         <SafeAreaView style={styles.container}>
-            {/* Header */}
             <View style={styles.headerBar}>
                 <Text style={styles.headerTitle}>Profile</Text>
             </View>
 
-            {/* Profile Card */}
             <View style={styles.profileCard}>
                 <Image source={require('../../assets/MainProfile.png')} style={styles.profileAvatar} />
                 <View style={styles.profileInfo}>
                     <Text style={styles.profileName}>{currentUser.username}</Text>
                     <Text style={styles.profileEmail}>{currentUser.email}</Text>
                 </View>
-                {/* <TouchableOpacity>
-                    <Text style={styles.threeDots}>...</Text>
-                </TouchableOpacity> */}
             </View>
 
-            {/* Options */}
             <View style={styles.optionsContainer}>
                 <ProfileOption
                     icon={<SettingsIcon />}
                     text="Settings"
-                    onPress={() => console.log('Settings Pressed (Manual)')} // Manual press action
+                    onPress={() => console.log('Settings Pressed (Manual)')}
                 />
                 <ProfileOption
                     icon={<HelpIcon />}
                     text="Help center"
-                    onPress={() => console.log('Help center Pressed (Manual)')} // Manual press action
+                    onPress={() => console.log('Help center Pressed (Manual)')}
                 />
                 <ProfileOption
                     icon={<LogoutIcon />}
@@ -109,10 +105,8 @@ const ProfileScreen = ({ navigation }) => { // Ensure navigation prop is receive
     );
 };
 
-// --- Styles (unchanged from your last request, except for removing iconPlaceholder) ---
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff' },
-
     headerBar: {
         paddingHorizontal: 20,
         paddingTop: 50,
@@ -120,7 +114,6 @@ const styles = StyleSheet.create({
         backgroundColor: '#fff'
     },
     headerTitle: { fontSize: 32, fontWeight: 'bold' },
-
     profileCard: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -138,7 +131,6 @@ const styles = StyleSheet.create({
     profileName: { fontSize: 18, fontWeight: 'bold' },
     profileEmail: { fontSize: 14, color: '#8A8A8E', marginTop: 4 },
     threeDots: { fontSize: 24, fontWeight: 'bold', color: '#8A8A8E' },
-
     optionsContainer: { marginTop: 20, paddingHorizontal: 20 },
     optionRow: {
         flexDirection: 'row',

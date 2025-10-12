@@ -22,6 +22,7 @@ const ChatScreen = ({ route, navigation }) => {
 
   const [isLoadingMessages, setIsLoadingMessages] = useState(true);
   const [messageFetchError, setMessageFetchError] = useState(null);
+  const [isSpeaking, setIsSpeaking] = useState(false); // <-- ADD THIS LINE
 
   // Use the actual current user's ID
   const currentUserId = currentUser?._id; // Access currentUser from context
@@ -36,7 +37,9 @@ const ChatScreen = ({ route, navigation }) => {
     );
   }
 
-  const [messages, setMessages] = useState(conversations[contact.name] || []);
+  // const [messages, setMessages] = useState(conversations[contact.name] || []);
+
+  const messages = conversations[contact.name] || [];
   const [textInput, setTextInput] = useState('');
   const { status, recognizedText, error, startListening, stopListening, setRecognizedText } = useVoiceRecognition();
   const chatId = contact._id;
@@ -76,27 +79,26 @@ const ChatScreen = ({ route, navigation }) => {
     fetchMessages();
   }, [chatId, currentUserId, contact.name, setConversations]); // Add currentUserId to dependency array
 
-  useEffect(() => {
-    setMessages(conversations[contact.name] || []);
-  }, [conversations, contact.name]);
+  // useEffect(() => {
+  //   setMessages(conversations[contact.name] || []);
+  // }, [conversations, contact.name]);
 
   useEffect(() => {
     flatListRef.current?.scrollToEnd({ animated: true });
   }, [messages]);
 
-  useEffect(() => {
-    // This useEffect is redundant with the previous one, you can combine or remove this.
-    // setMessages(conversations[contact.name] || []);
-  }, [conversations[contact.name]]);
+  // useEffect(() => {
+  //   // This useEffect is redundant with the previous one, you can combine or remove this.
+  //   // setMessages(conversations[contact.name] || []);
+  // }, [conversations[contact.name]]);
 
   useEffect(() => {
     if (!isAccessibilityMode || isLoadingMessages) return;
 
     Speech.stop();
     const currentMsgs = conversations[contact.name] || [];
-    // Filter by actual senderId not equal to currentUserId
     const unreadMsgs = currentMsgs.filter(
-      m => !m.read && m.senderId !== currentUserId
+      m => !m.read && m.sender !== 'user' && m.senderId !== currentUserId
     );
 
     let speechOutput = '';
@@ -114,58 +116,159 @@ const ChatScreen = ({ route, navigation }) => {
     });
 
     // Mark as read
-    // The PUT request handles marking as read on the backend, which will then refetch messages
-    // This local update is only for immediate UI feedback if needed, but not strictly necessary
-    // after the PUT request has been sent and subsequent fetch.
-    // const updatedMsgs = currentMsgs.map(m => ({ ...m, read: true }));
-    // setConversations(prev => ({ ...prev, [contact.name]: updatedMsgs }));
-  }, [isAccessibilityMode, isLoadingMessages, conversations, contact.name, currentUserId, startListening]);
+    const updatedMsgs = currentMsgs.map(m => ({ ...m, read: true }));
+    setConversations(prev => ({ ...prev, [contact.name]: updatedMsgs }));
+    
+  }, [isAccessibilityMode, isLoadingMessages]);
 
+  const sendMessage = useCallback(async (text, senderName) => { // Renamed sender to senderName for clarity
+    if (!text.trim() || !chatId || !currentUserId) { // Ensure currentUserId exists
+        console.warn("Cannot send message: Missing text, chatId, or currentUserId.");
+        return;
+    }
 
-const sendMessage = useCallback(async (text, senderName) => { // Renamed sender to senderName for clarity
-  if (!text.trim() || !chatId || !currentUserId) { // Ensure currentUserId exists
-      console.warn("Cannot send message: Missing text, chatId, or currentUserId.");
-      return;
-  }
+    const newMessage = {
+      id: Date.now().toString(), // Client-side ID for immediate display
+      text,
+      sender: senderName, // This `sender` field is for UI display (e.g., 'user' or contact.name)
+      read: senderName === 'user',
+      senderId: senderName === 'user' ? currentUserId : contact._id, // This is the ID stored in DB
+      timestamp: new Date().toISOString(),
+    };
 
-  const newMessage = {
-    id: Date.now().toString(), // Client-side ID for immediate display
-    text,
-    sender: senderName, // This `sender` field is for UI display (e.g., 'user' or contact.name)
-    read: senderName === 'user',
-    senderId: senderName === 'user' ? currentUserId : contact._id, // This is the ID stored in DB
-    timestamp: new Date().toISOString(),
-  };
+    // Optimistic UI update: Add message locally first
+    // const updatedMessages = [...(conversations[contact.name] || []), newMessage];
+    // setConversations(prev => ({ ...prev, [contact.name]: updatedMessages }));
 
-  // Optimistic UI update: Add message locally first
-  const updatedMessages = [...(conversations[contact.name] || []), newMessage];
-  setConversations(prev => ({ ...prev, [contact.name]: updatedMessages }));
-  if (senderName === 'user') setTextInput('');
-
-  try {
-    const response = await fetch(`${API_URL}/chats/${chatId}/messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chatId: chatId,
-        senderId: newMessage.senderId,
-        text: newMessage.text,
-        createdAt: newMessage.timestamp, // Backend expects createdAt
-      }),
+    setConversations(prevConversations => {
+      const currentChatMessages = prevConversations[contact.name] || [];
+      const updatedMessages = [...currentChatMessages, newMessage];
+      return {
+        ...prevConversations,
+        [contact.name]: updatedMessages
+      };
     });
 
-    if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || "Failed to send message to database.");
+    if (senderName === 'user') setTextInput('');
+
+    try {
+      const response = await fetch(`${API_URL}/chats/${chatId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatId: chatId,
+          senderId: newMessage.senderId,
+          text: newMessage.text,
+          createdAt: newMessage.timestamp, // Backend expects createdAt
+        }),
+      });
+
+      if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.message || "Failed to send message to database.");
+      }
+      // Optionally refetch messages after successful send to get the server-assigned _id and exact timestamp
+      // Or just rely on the optimistic update for now. For simplicity, we'll keep it optimistic.
+    } catch (err) {
+      console.error('Error saving message to DB:', err);
+      Alert.alert("Error", `Failed to send message: ${err.message}`);
+      // Revert optimistic update if send fails, or show error state for this message
     }
-    // Optionally refetch messages after successful send to get the server-assigned _id and exact timestamp
-    // Or just rely on the optimistic update for now. For simplicity, we'll keep it optimistic.
-  } catch (err) {
-    console.error('Error saving message to DB:', err);
-    Alert.alert("Error", `Failed to send message: ${err.message}`);
-    // Revert optimistic update if send fails, or show error state for this message
-  }
-}, [conversations, contact.name, setConversations, chatId, currentUserId, contact._id]);
+  }, [conversations, contact.name, setConversations, chatId, currentUserId, contact._id]);
+
+
+  const deleteLastUserMessage = useCallback(async (isVoiceCommand = false) => {
+    if (!chatId || !currentUserId) {
+      const message = "Cannot delete message. Information is missing.";
+      if (isVoiceCommand) {
+        Speech.speak(message, { onDone: () => isAccessibilityMode && startListening() });
+      } else {
+        Alert.alert("Error", message);
+      }
+      return;
+    }
+
+    const currentChatMessages = conversations[contact.name] || [];
+    const lastUserMessageIndex = currentChatMessages.findLastIndex(
+      m => m.senderId === currentUserId
+    );
+
+    if (lastUserMessageIndex === -1) {
+      const message = "There are no messages from you to delete.";
+      if (isVoiceCommand) {
+        Speech.speak(message, { onDone: () => isAccessibilityMode && startListening() });
+      } else {
+        Alert.alert("No Message", message);
+      }
+      return;
+    }
+
+    if (isVoiceCommand) setIsSpeaking(true);
+
+    try {
+      const response = await fetch(`${API_URL}/chats/${chatId}/messages/last/${currentUserId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to delete message.");
+      }
+
+      setConversations(prev => {
+        const updatedMessages = [...(prev[contact.name] || [])];
+        updatedMessages.splice(lastUserMessageIndex, 1);
+        return { ...prev, [contact.name]: updatedMessages };
+      });
+
+      if (isVoiceCommand) {
+        Speech.speak("Your last message has been deleted.", {
+          onDone: () => {
+            setIsSpeaking(false);
+            if (isAccessibilityMode) startListening();
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Error deleting last message:', err);
+      const message = `Failed to delete message: ${err.message}.`;
+      if (isVoiceCommand) {
+        Speech.speak(message, {
+          onDone: () => {
+            setIsSpeaking(false);
+            if (isAccessibilityMode) startListening();
+          }
+        });
+      } else {
+        Alert.alert("Error", message);
+      }
+    }
+  }, [chatId, currentUserId, conversations, contact.name, setConversations, isAccessibilityMode, startListening]);
+
+  const handleLongPressMessage = (message) => {
+    // Only allow deletion if accessibility is OFF and it's the user's own message
+    if (isAccessibilityMode || message.senderId !== currentUserId) {
+      return;
+    }
+
+    Alert.alert(
+      "Delete Message",
+      "Are you sure you want to delete your last message?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Delete",
+          style: "destructive",
+          // Call the delete function, passing false for isVoiceCommand
+          onPress: () => deleteLastUserMessage(false)
+        }
+      ]
+    );
+  };
 
 
   // ✅ Handle voice commands cleanly
@@ -183,7 +286,13 @@ const sendMessage = useCallback(async (text, senderName) => { // Renamed sender 
       return;
     }
 
-    // Send user message
+    if (lower.includes('delete last message')) {
+      setRecognizedText(''); 
+      // deleteLastUserMessage();
+      deleteLastUserMessage(true); 
+      return;
+    }
+
     sendMessage(recognizedText, 'user');
     Speech.speak(`You said: ${recognizedText}`, {
       onDone: () => {
@@ -222,7 +331,6 @@ const sendMessage = useCallback(async (text, senderName) => { // Renamed sender 
     );
   }
 
-  // Handle case where currentUserId is not available (e.g., not logged in)
   if (!currentUserId) {
     return (
       <SafeAreaView style={styles.errorContainer}>
@@ -257,20 +365,26 @@ const sendMessage = useCallback(async (text, senderName) => { // Renamed sender 
           style={styles.messageList}
           data={messages}
           keyExtractor={(item) => (item.id || item._id).toString()}
-          renderItem={({ item }) => (
-            <View style={[
-              styles.messageBubble,
-              item.sender === 'user' || item.senderId === currentUserId // Use currentUserId for sender check
-                ? styles.userMessage
-                : styles.contactMessage
-            ]}>
-              <Text style={{
-                color: item.sender === 'user' || item.senderId === currentUserId ? '#fff' : '#000'
-              }}>
-                {item.text}
-              </Text>
-            </View>
-          )}
+          renderItem={({ item }) => {
+            const isUserMessage = item.sender === 'user' || item.senderId === currentUserId;
+
+            return (
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onLongPress={() => handleLongPressMessage(item)}
+                disabled={!isUserMessage || isAccessibilityMode}
+              >
+                <View style={[
+                  styles.messageBubble,
+                  isUserMessage ? styles.userMessage : styles.contactMessage
+                ]}>
+                  <Text style={{ color: isUserMessage ? '#fff' : '#000' }}>
+                    {item.text}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            );
+          }}
         />
 
         {!isAccessibilityMode && (

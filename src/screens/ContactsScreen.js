@@ -13,8 +13,9 @@ import {
 import * as Speech from 'expo-speech';
 import { useIsFocused } from '@react-navigation/native';
 import { FontAwesome } from "@expo/vector-icons";
-import { imageMap } from '../utils/imageMap'; // Assuming imageMap is for your *chat* profile images
+import Fuse from 'fuse.js';
 
+import { imageMap } from '../utils/imageMap';
 import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
 import { useAppContext } from '../context/AppContext';
 
@@ -22,36 +23,54 @@ const ContactsScreen = ({ navigation }) => {
     const { isAccessibilityMode, setAccessibilityMode, setIsAuthenticated, currentUser } = useAppContext();
     const { status, recognizedText, startListening, setRecognizedText } = useVoiceRecognition();
 
-    const [activeChats, setActiveChats] = useState([]); // State to hold active chats from DB
+    const [activeChats, setActiveChats] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [fetchError, setFetchError] = useState(null);
     const isFocused = useIsFocused();
     const hasVisited = useRef(false);
+
+    const fuse = useRef(new Fuse([], {
+        keys: ['name'],
+        threshold: 0.3,
+        ignoreLocation: true,
+        minMatchCharLength: 3
+    }));
+
+    // Effect to update Fuse.js collection when activeChats changes
+    useEffect(() => {
+        if (activeChats.length > 0) {
+            fuse.current.setCollection(activeChats);
+        } else {
+            fuse.current.setCollection([]);
+        }
+    }, [activeChats]);
     
     useEffect(() => {
         const fetchActiveChats = async () => {
             setIsLoading(true);
             setFetchError(null);
             try {
-                const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.180.131.188:3001'; // Use environment variable
-                const response = await fetch(`${API_URL}/chats`); // NEW ENDPOINT
+                const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.180.131.188:3001';
+                const response = await fetch(`${API_URL}/chats`);
 
                 if (!response.ok) {
                     const errorData = await response.json();
                     throw new Error(errorData.message || 'Failed to fetch active chats.');
                 }
                 const data = await response.json();
-
-                // Filter chats to only show those where currentUserId is a participant
                 const currentUserId = currentUser?._id;
-                const userChats = data.filter(chat => {
-                    const chatP1 = chat.participant1Id;
-                    const chatP2 = chat.participant2Id;
-                    const match = chatP1 === currentUserId || chatP2 === currentUserId;
-                    return match;
-                    });
 
-                setActiveChats(userChats); // Store active chats in local state
+                // 1. Filter chats to only show those where currentUserId is a participant
+                const userChats = data.filter(chat => {
+                    return chat.participant1Id === currentUserId || chat.participant2Id === currentUserId;
+                });
+
+                // 2. Sort the filtered chats by the most recent updatedAt timestamp
+                const sortedChats = userChats.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+                
+                // 3. Set the state with the final sorted and filtered array
+                setActiveChats(sortedChats);
+
             } catch (error) {
                 console.error("Error fetching active chats:", error);
                 setFetchError(error.message);
@@ -63,40 +82,37 @@ const ContactsScreen = ({ navigation }) => {
         if (isFocused) {
             fetchActiveChats();
         }
-    }, [isFocused]);
+    }, [isFocused, currentUser?._id]);
+    
+    // Effect for accessibility mode greetings and listening
+    useEffect(() => {
+        if (isFocused && isAccessibilityMode) {
+            if (isLoading) return;
 
-    // --- Original useEffect for accessibility mode greetings and listening ---
-useEffect(() => {
-  if (isFocused && isAccessibilityMode) {
-    if (isLoading) return;
+            if (fetchError) {
+                Speech.stop();
+                Speech.speak(`There was an error loading your chats: ${fetchError}`);
+                return;
+            }
 
-    if (fetchError) {
-      Speech.stop(); // stop previous speech if any
-      Speech.speak(`There was an error loading your chats: ${fetchError}`);
-      return;
-    }
+            let message;
+            if (!hasVisited.current) {
+                message = "Welcome to your active chats. Say 'Chat with' and a name, 'add new chat', 'go to profile', or 'log out'.";
+                hasVisited.current = true;
+            } else {
+                message = "You are on the chats screen. To open a chat, say 'chat with' and the person's name.";
+            }
 
-    let message;
-    if (!hasVisited.current) {
-      message = "Welcome to your active chats. Say 'Chat with' and a name, 'add new chat', 'go to profile', or 'log out'.";
-      hasVisited.current = true;
-    } else {
-      message = "You are on the chats screen. To open a chat, say 'chat with' and the person's name.";
-    }
+            Speech.stop();
+            Speech.speak(message, { onDone: startListening });
+        }
 
-    // 🛑 Stop overlapping speech before speaking new message
-    Speech.stop();
-    Speech.speak(message, { onDone: startListening });
-  }
+        return () => {
+            Speech.stop();
+        };
+    }, [isFocused, isLoading, fetchError, isAccessibilityMode]);
 
-  // 🧹 Cleanup when screen is unfocused
-  return () => {
-    Speech.stop();
-  };
-}, [isFocused, isLoading, fetchError, isAccessibilityMode]);
-
-
-    // --- Original useEffect for voice command processing ---
+    // Effect for voice command processing
     useEffect(() => {
         if (!isAccessibilityMode || status !== 'idle' || !recognizedText || !isFocused) return;
 
@@ -109,34 +125,23 @@ useEffect(() => {
             Speech.speak("Navigating to profile.", { onDone: () => navigation.navigate('Profile') });
         } else if (lowerCaseText.includes('log out')) {
             Speech.speak("Logging you out. Goodbye!", { onDone: () => setIsAuthenticated(false) });
-        } else if (lowerCaseText.includes('add new chat')) { // Changed command to be specific
+        } else if (lowerCaseText.includes('add new chat')) {
             Speech.speak("Opening new chat screen to add a person.", { onDone: () => navigation.navigate('AddChat') });
         } else {
             const match = lowerCaseText.match(/chat with (.*)/);
-            console.log(match);
-
             if (match && match[1]) {
                 let capturedName = match[1].trim();
                 capturedName = capturedName.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").replace(/\s{2,}/g, " ");
 
-                // --- MODIFIED: Find contact in activeChats ---
-                const chat = activeChats.find(c => c.name && c.name.toLowerCase() === capturedName);
+                const searchResults = fuse.current.search(capturedName);
+                let chat = null;
+                if (searchResults.length > 0) {
+                    chat = searchResults[0].item;
+                }
 
                 if (chat) {
                     Speech.speak(`Opening chat with ${chat.name}`);
-                    navigation.navigate('Chat', {
-                        contact: {
-                            _id: chat._id, // Use chat ID as contact ID for consistency
-                            name: chat.name,
-                            image: chat.image, // Use image from chat data
-                            lastMessage: chat.lastMessage,
-                            time: chat.time,
-                            unread: chat.unread,
-                            // ** THESE ARE THE MISSING PIECES FOR VOICE COMMAND NAVIGATION **
-                            participant1Id: chat.participant1Id,
-                            participant2Id: chat.participant2Id,
-                        }
-                    });
+                    navigation.navigate('Chat', { contact: chat });
                 } else {
                     Speech.speak(`Sorry, I could not find an active chat with ${capturedName}. Try saying 'add new chat' to start one.`, { onDone: startListening });
                 }
@@ -145,8 +150,32 @@ useEffect(() => {
             }
         }
         setRecognizedText('');
-    }, [recognizedText, status, activeChats, isAccessibilityMode, isFocused, navigation, setIsAuthenticated]);
+    }, [recognizedText, status, activeChats, isAccessibilityMode, isFocused, navigation, setIsAuthenticated, setRecognizedText, startListening]);
 
+    // Helper function to format the timestamp
+    const formatTimestamp = (timestamp) => {
+        if (!timestamp) return '';
+
+        const now = new Date();
+        const messageDate = new Date(timestamp);
+
+        const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfMessageDate = new Date(messageDate.getFullYear(), messageDate.getMonth(), messageDate.getDate());
+
+        const yesterday = new Date(startOfToday);
+        yesterday.setDate(yesterday.getDate() - 1);
+
+        if (startOfMessageDate.getTime() === startOfToday.getTime()) {
+            // This line is updated to explicitly force the 12-hour format
+            return messageDate.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
+        }
+
+        if (startOfMessageDate.getTime() === yesterday.getTime()) {
+            return "Yesterday";
+        }
+
+        return messageDate.toLocaleDateString();
+    };
 
     if (isLoading) {
         return (
@@ -165,7 +194,7 @@ useEffect(() => {
             </SafeAreaView>
         );
     }
-    
+
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.headerBar}>
@@ -182,26 +211,15 @@ useEffect(() => {
                 </TouchableOpacity>
             </View>
             <FlatList
-                data={activeChats} // Render active chats
-                keyExtractor={(item) => item._id} // Use chat ID
+                data={activeChats}
+                keyExtractor={(item) => item._id}
                 renderItem={({ item }) => {
                     const imageSource = imageMap[item.image] || { uri: item.image } || require('../../assets/profileDemo.jpg');
                     return (
-                        <TouchableOpacity style={styles.contactItem}
+                        <TouchableOpacity 
+                            style={styles.contactItem}
                             onPress={() => {
-                                navigation.navigate('Chat', {
-                                    contact: {
-                                        _id: item._id,
-                                        name: item.name,
-                                        image: item.image,
-                                        lastMessage: item.lastMessage,
-                                        time: item.time,
-                                        unread: item.unread,
-                                        // ** THESE ARE THE MISSING PIECES FOR FLATLIST NAVIGATION **
-                                        participant1Id: item.participant1Id,
-                                        participant2Id: item.participant2Id,
-                                    }
-                                });
+                                navigation.navigate('Chat', { contact: item });
                             }}
                         >
                             <Image
@@ -210,11 +228,15 @@ useEffect(() => {
                             />
                             <View style={styles.contactInfo}>
                                 <Text style={styles.contactName}>{item.name}</Text>
-                                <Text style={styles.contactMessage}>{item.lastMessage}</Text>
+                                <Text style={styles.contactMessage} numberOfLines={1}>{item.lastMessage}</Text>
                             </View>
                             <View style={styles.contactMeta}>
-                                <Text style={styles.contactTime}>{item.time}</Text>
-                                {item.unread > 0 && (<View style={styles.unreadBadge}><Text style={styles.unreadText}>{item.unread}</Text></View>)}
+                                <Text style={styles.contactTime}>{formatTimestamp(item.updatedAt)}</Text>
+                                {item.unread > 0 && (
+                                    <View style={styles.unreadBadge}>
+                                        <Text style={styles.unreadText}>{item.unread}</Text>
+                                    </View>
+                                )}
                             </View>
                         </TouchableOpacity>
                     );

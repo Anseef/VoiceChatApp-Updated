@@ -12,39 +12,57 @@ import * as Speech from 'expo-speech';
 import { useAppContext } from '../context/AppContext';
 import { FontAwesome } from '@expo/vector-icons';
 import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
+import Fuse from 'fuse.js';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.180.131.188:3001';
 
 const AddChatScreen = () => {
     const navigation = useNavigation();
     const isFocused = useIsFocused();
-    const { isAccessibilityMode,currentUser } = useAppContext();
-    const { status, recognizedText, error, startListening, setRecognizedText, stopListening } = useVoiceRecognition();
+    const { isAccessibilityMode, currentUser } = useAppContext();
+    const { status, recognizedText, error, startListening, setRecognizedText } = useVoiceRecognition(); // Removed stopListening from here
 
     const [phoneContacts, setPhoneContacts] = useState([]);
     const [isLoadingContacts, setIsLoadingContacts] = useState(true);
-    const [isLoading, setIsLoading] = useState(false);
+    const [isLoading, setIsLoading] = useState(false); // Used for chat creation
     const [fetchError, setFetchError] = useState(null);
     
+
     const currentUserId = currentUser?._id;
     const currentUserName = currentUser?.username;
 
     const speakingActive = useRef(false);
-    const hasSpokenGreeting = useRef(false); // <-- SOLUTION 1: Flag to prevent greeting loop
+    const hasSpokenGreeting = useRef(false);
+
+    // --- Fuse.js for fuzzy matching contacts ---
+    const fuse = useRef(new Fuse([], {
+        keys: ['name'], // Search by contact name
+        threshold: 0.3,  // Adjust for desired fuzziness (0 = exact, 1 = very loose)
+        ignoreLocation: true,
+        minMatchCharLength: 3
+    }));
+
+    // Effect to update Fuse.js collection when phoneContacts changes
+    useEffect(() => {
+        if (phoneContacts.length > 0) {
+            fuse.current.setCollection(phoneContacts);
+        } else {
+            fuse.current.setCollection([]);
+        }
+    }, [phoneContacts]);
+    // --- End Fuse.js setup ---
+
 
     // --- EFFECT TO CLEAR STALE TEXT ON FOCUS ---
     useEffect(() => {
         if (isFocused) {
-            // Clear any text from the previous screen immediately
             setRecognizedText('');
-            // Reset greeting flag when the screen is re-focused
-            hasSpokenGreeting.current = false;
+            hasSpokenGreeting.current = false; // Reset greeting flag
         }
     }, [isFocused, setRecognizedText]);
 
     useEffect(() => {
         const loadContacts = async () => {
-            // ... (your existing loadContacts logic remains unchanged)
             setIsLoadingContacts(true);
             try {
                 const { status: permissionStatus } = await Contacts.requestPermissionsAsync();
@@ -61,6 +79,7 @@ const AddChatScreen = () => {
                         setPhoneContacts(sortedContacts);
                     } else {
                         console.log("No contacts found.");
+                        Alert.alert("No Contacts", "No contacts found on your device.");
                     }
                 } else {
                     Alert.alert('Permission denied', 'Access to contacts is required to add new chats.');
@@ -80,7 +99,7 @@ const AddChatScreen = () => {
         }
     }, [isFocused]);
 
-    // --- ACCESSIBILITY GREETING (RUNS ONLY ONCE) ---
+    // --- ACCESSIBILITY GREETING (RUNS ONLY ONCE PER FOCUS) ---
     useEffect(() => {
         if (isFocused && isAccessibilityMode && !isLoadingContacts && !hasSpokenGreeting.current) {
             if (status === 'idle' && !speakingActive.current) {
@@ -101,8 +120,10 @@ const AddChatScreen = () => {
         }
     }, [isFocused, isAccessibilityMode, isLoadingContacts, status, startListening]);
 
+
     // --- VOICE COMMAND PROCESSING ---
     useEffect(() => {
+        // Only process if in accessibility mode, focused, recognition is idle, recognized text exists, and not currently speaking
         if (!isAccessibilityMode || !isFocused || status !== 'idle' || !recognizedText || speakingActive.current) {
             return;
         }
@@ -110,36 +131,60 @@ const AddChatScreen = () => {
         const lowerCaseText = recognizedText.toLowerCase().trim().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
         console.log("ADD_CHAT_SCREEN: Processing command:", lowerCaseText);
 
+        // Clear recognized text immediately to prevent re-processing
+        setRecognizedText('');
+
+        speakingActive.current = true; // Indicate that speech is about to happen
+
         if (lowerCaseText === 'go back') {
             Speech.speak("Going back.", {
                 onDone: () => {
-                    stopListening?.(); // Stop mic before navigating
+                    speakingActive.current = false;
                     navigation.goBack();
-                }
+                },
+                onError: () => speakingActive.current = false
             });
-        } else {
-            const matchingContact = phoneContacts.find(c =>
-                c.name && c.name.toLowerCase().includes(lowerCaseText)
-            );
+            return;
+        }
 
-            if (matchingContact) {
-                if (!isLoading) {
-                    initiateChat(matchingContact);
-                }
+        // --- Fuzzy search for the contact ---
+        const searchResults = fuse.current.search(lowerCaseText);
+        console.log("Fuse search results for:", lowerCaseText, searchResults);
+
+        let matchingContact = null;
+        if (searchResults.length > 0) {
+            matchingContact = searchResults[0].item; // Take the first best match
+        }
+
+
+        if (matchingContact) {
+            if (!isLoading) { // Ensure chat creation isn't already in progress
+                initiateChat(matchingContact);
             } else {
-                Speech.speak(`Sorry, I couldn't find a contact named ${recognizedText}. Please try again.`, {
-                    onDone: startListening
+                // If loading, probably means a chat creation is already in progress from a previous command
+                Speech.speak("Please wait, I'm already trying to start a chat.", {
+                    onDone: () => {
+                        speakingActive.current = false;
+                        if (isAccessibilityMode) startListening();
+                    },
+                    onError: () => speakingActive.current = false
                 });
             }
+        } else {
+            Speech.speak(`Sorry, I couldn't find a contact named ${recognizedText}. Please try again.`, {
+                onDone: () => {
+                    speakingActive.current = false;
+                    if (isAccessibilityMode) startListening();
+                },
+                onError: () => speakingActive.current = false
+            });
         }
-        // Clear the text after it has been processed
-        setRecognizedText('');
 
-    }, [recognizedText, status, isFocused, isAccessibilityMode]);
+    }, [recognizedText, status, isFocused, isAccessibilityMode, isLoading, navigation]);
 
 
     const initiateChat = useCallback(async (contact) => {
-        if (isLoading) return;
+        if (isLoading) return; // Double check if already loading
         setIsLoading(true);
 
         try {
@@ -164,9 +209,12 @@ const AddChatScreen = () => {
             const newChat = responseData.chat;
 
             // SOLUTION 2: Use onDone for reliable navigation after speaking
+            speakingActive.current = true; // Set speaking status
             Speech.speak(`Starting chat with ${newChat.name}.`, {
                 onDone: () => {
-                    stopListening?.(); // Stop mic before navigating
+                    speakingActive.current = false; // Speech done
+                    // No need to stopListening here, as we're navigating away,
+                    // and the component will unmount.
                     navigation.navigate('Chat', {
                         contact: {
                             _id: newChat._id,
@@ -179,21 +227,26 @@ const AddChatScreen = () => {
                             unread: newChat.unread || 0,
                         }
                     });
-                }
+                },
+                onError: () => speakingActive.current = false
             });
 
         } catch (error) {
             console.error("Error initiating chat:", error);
+            speakingActive.current = true; // Set speaking status for error message
             Speech.speak(`Failed to start chat. ${error.message}. Please try again.`, {
-                onDone: startListening
+                onDone: () => {
+                    speakingActive.current = false;
+                    if (isAccessibilityMode) startListening(); // Allow user to try again
+                },
+                onError: () => speakingActive.current = false
             });
         } finally {
-            setIsLoading(false);
+            setIsLoading(false); // Reset loading state
         }
-    }, [isLoading, navigation, startListening, stopListening]);
+    }, [isLoading, navigation, currentUserId, currentUserName, isAccessibilityMode]);
 
 
-    // ... (your return statement with JSX remains the same)
     return (
         <SafeAreaView style={styles.container}>
             <View style={styles.header}>
@@ -223,7 +276,7 @@ const AddChatScreen = () => {
                         <TouchableOpacity
                             style={styles.contactItem}
                             onPress={() => initiateChat(item)}
-                            disabled={isLoading}
+                            disabled={isLoading || speakingActive.current} // Disable if creating chat or speaking
                         >
                             <Image
                                 source={item.imageAvailable && item.image.uri
@@ -232,7 +285,7 @@ const AddChatScreen = () => {
                                 style={styles.contactImage}
                             />
                             <Text style={styles.contactName}>{item.name}</Text>
-                            {isLoading && (
+                            {(isLoading && item.id.toString() === currentUser?._id) && ( // Only show loading for the selected item
                                 <View style={styles.loadingOverlay}>
                                     <ActivityIndicator size="small" color="#586eeb" />
                                 </View>
@@ -241,17 +294,29 @@ const AddChatScreen = () => {
                     )}
                 />
             )}
+            {/* Listening indicator when in accessibility mode and microphone is active and not speaking */}
             {isAccessibilityMode && status === 'listening' && !speakingActive.current && (
                 <View style={styles.listeningIndicator}>
                     <ActivityIndicator size="small" color="#586eeb" />
                     <Text style={{ marginLeft: 5 }}>Listening...</Text>
                 </View>
             )}
+            {/* Optional error display for voice recognition */}
+            {isAccessibilityMode && error && (
+                <View style={styles.listeningIndicator}>
+                    <Text style={{ color: 'red' }}>Voice Error: {error}</Text>
+                </View>
+            )}
+            {/* Optional recognized text display */}
+            {isAccessibilityMode && recognizedText && status !== 'listening' && (
+                <View style={styles.listeningIndicator}>
+                    <Text style={{ color: '#555' }}>Heard: {recognizedText}</Text>
+                </View>
+            )}
         </SafeAreaView>
     );
 };
 
-// ... (your styles remain unchanged)
 const styles = StyleSheet.create({
     container: { flex: 1, backgroundColor: '#fff' },
     header: {
@@ -294,6 +359,7 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
+    // Styles for the listening indicator
     listeningIndicator: {
         flexDirection: 'row',
         alignItems: 'center',
