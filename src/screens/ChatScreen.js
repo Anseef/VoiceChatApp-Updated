@@ -244,7 +244,7 @@ const ChatScreen = ({ route, navigation }) => {
     // }
 
     if (lower.includes('exit chat') || lower.includes('go back')) {
-      Speech.speak("Exiting chat.", { onDone: () => navigation.goBack() });
+      Speech.speak("Exiting chat.", { onDone: () => navigation.navigate('Home') });
       return;
     }
 

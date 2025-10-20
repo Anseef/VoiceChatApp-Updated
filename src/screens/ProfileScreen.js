@@ -6,8 +6,8 @@ import { FontAwesome } from "@expo/vector-icons";
 import { useVoiceRecognition } from '../hooks/useVoiceRecognition';
 import * as Speech from 'expo-speech';
 
-const SettingsIcon = ({ color = '#000', size = 24 }) => (
-    <FontAwesome name="cog" size={size} color={color} />
+const AppInfo = ({ color = '#000', size = 24 }) => (
+    <FontAwesome name="info-circle" size={size} color={color} />
 );
 const HelpIcon = ({ color = '#000', size = 24 }) => (
     <FontAwesome name="question-circle" size={size} color={color} />
@@ -21,37 +21,32 @@ const ProfileScreen = ({ navigation }) => {
     const { isAccessibilityMode, setIsAuthenticated, currentUser } = useAppContext();
     const { status, recognizedText, startListening, setRecognizedText } = useVoiceRecognition();
 
-    const hasSpokenOnce = useRef(false);
+    // const hasSpokenOnce = useRef(false);
 
     const handleLogout = useCallback(() => setIsAuthenticated(false), [setIsAuthenticated]);
 
     // ✅ Always speak on first mount + whenever screen is focused again
-    useEffect(() => {
+useEffect(() => {
         if (!isAccessibilityMode) return;
 
-        // First mount
-        if (!hasSpokenOnce.current) {
-            hasSpokenOnce.current = true;
-            setTimeout(() => {
-                Speech.speak(
-                    "You are on the profile screen. Say 'go to home', 'go to settings', 'go to help center', or 'log out'.",
-                    { onDone: startListening }
-                );
-            }, 400);
-        }
-
-        // Every time user refocuses on screen
         if (isFocused) {
-            setTimeout(() => {
+            // When the screen is in focus, speak the greeting.
+            const speakTimeout = setTimeout(() => {
                 Speech.speak(
-                    "You are on the profile screen. Say 'go to home', 'go to settings', 'go to help center', or 'log out'.",
+                    // Updated the text to include all valid commands
+                    "You are on the profile screen. Say 'go to home', 'go to app info', 'go to help center', or 'log out'.",
                     { onDone: startListening }
                 );
-            }, 300);
+            }, 300); // A small delay ensures screen transitions are smooth
+
+            // Clean up the timeout if the user navigates away quickly
+            return () => clearTimeout(speakTimeout);
         } else {
+            // If the screen is not focused, stop any speech.
             Speech.stop();
         }
 
+        // General cleanup function
         return () => {
             Speech.stop();
         };
@@ -66,10 +61,10 @@ const ProfileScreen = ({ navigation }) => {
 
         if (lower.includes('go to home') || lower.includes('go back')) {
             Speech.speak("Navigating to chats.", { onDone: () => navigation.navigate('Chats') });
-        } else if (lower.includes('go to settings')) {
-            Speech.speak("Navigating to settings.", { onDone: () => console.log('Navigate to Settings') });
         } else if (lower.includes('go to help center')) {
-            Speech.speak("Navigating to help center.", { onDone: () => console.log('Navigate to Help Center') });
+            Speech.speak("Navigating to Help Center.", { onDone: () => navigation.navigate('Help') });
+        } else if (lower.includes('go to app info')) {
+            Speech.speak("Navigating to App Info.", { onDone: () => navigation.navigate('AppInfo')});
         } else if (lower.includes('log out')) {
             Speech.speak("Logging you out. Goodbye!", { onDone: handleLogout });
         } else {
@@ -77,7 +72,7 @@ const ProfileScreen = ({ navigation }) => {
         }
 
         setRecognizedText('');
-    }, [recognizedText, status, isFocused, isAccessibilityMode, navigation, startListening, handleLogout, setRecognizedText]);
+    }, [recognizedText, status, isFocused, isAccessibilityMode, navigation, handleLogout, setRecognizedText]);
 
     const ProfileOption = ({ icon, text, onPress }) => (
         <TouchableOpacity style={styles.optionRow} onPress={onPress}>
@@ -102,8 +97,8 @@ const ProfileScreen = ({ navigation }) => {
             </View>
 
             <View style={styles.optionsContainer}>
-                <ProfileOption icon={<SettingsIcon />} text="Settings" onPress={() => console.log('Settings pressed')} />
-                <ProfileOption icon={<HelpIcon />} text="Help center" onPress={() => console.log('Help pressed')} />
+                <ProfileOption icon={<AppInfo />} text="App Info" onPress={() => navigation.navigate('AppInfo')} />
+                <ProfileOption icon={<HelpIcon />} text="Help Center" onPress={() => navigation.navigate('Help')} />
                 <ProfileOption icon={<LogoutIcon />} text="Log out" onPress={handleLogout} />
             </View>
         </SafeAreaView>

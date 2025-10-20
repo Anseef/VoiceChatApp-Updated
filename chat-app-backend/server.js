@@ -335,7 +335,7 @@ app.delete('/chats/:chatId/messages/last/:userId', async (req, res) => {
 
 connectToMongo().then(() => {
     app.listen(PORT, () => {
-        console.log(`🚀 Server is running on http://10.180.131.188:${PORT}`);
+        console.log(`🚀 Server is running on http://10.228.13.188:${PORT}`);
     });
 });
 

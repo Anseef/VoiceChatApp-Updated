@@ -158,7 +158,7 @@ const AddChatScreen = () => {
                 });
             }
         } else {
-            Speech.speak(`Sorry, I couldn't find a contact named ${recognizedText}. Please try again.`, {
+            Speech.speak(`Sorry, I couldn't find a contact by this name. Please try again.`, {
                 onDone: () => {
                     speakingActive.current = false;
                     if (isAccessibilityMode) startListening();

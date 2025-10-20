@@ -14,6 +14,8 @@ import ProfileScreen from '../screens/ProfileScreen';
 import AuthScreen from '../screens/AuthScreen';
 import Icon from 'react-native-vector-icons/Ionicons';
 import CallScreen from '../screens/CallScreen';
+import AppInfoScreen from '../screens/AppInfoScreen';
+import HelpCenterScreen from '../screens/HelpCenterScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -103,6 +105,8 @@ const MainAppStack = () => {
       <Stack.Screen name="Chat" component={ChatScreen} />
       <Stack.Screen name="AddChat" component={AddChatScreen} />
       <Stack.Screen name="Call" component={CallScreen} />
+      <Stack.Screen name='AppInfo' component={AppInfoScreen} />
+      <Stack.Screen name='Help' component={HelpCenterScreen} />
     </Stack.Navigator>
   );
 }
