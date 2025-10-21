@@ -210,7 +210,13 @@ const ContactsScreen = ({ navigation }) => {
                     )}
                 </TouchableOpacity>
             </View>
-            <FlatList
+            {activeChats.length === 0 ? (
+            <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>No Active Chats</Text>
+                <Text style={styles.emptySubText}>To start a conversation go to add chats.</Text>
+            </View>)
+            :
+            (<FlatList
                 data={activeChats}
                 keyExtractor={(item) => item._id}
                 renderItem={({ item }) => {
@@ -241,7 +247,7 @@ const ContactsScreen = ({ navigation }) => {
                         </TouchableOpacity>
                     );
                 }}
-            />
+            />)}
         </SafeAreaView>
     );
 };
@@ -325,6 +331,23 @@ const styles = StyleSheet.create({
         color: '#fff',
         fontWeight: 'bold',
         fontSize: 12
+    },
+    emptyContainer: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: 20,
+    },
+    emptyText: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#333',
+        marginBottom: 8,
+    },
+    emptySubText: {
+        fontSize: 14,
+        color: '#888',
+        textAlign: 'center',
     },
 });
 

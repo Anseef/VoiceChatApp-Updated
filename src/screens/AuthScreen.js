@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import {
     SafeAreaView, Text, StyleSheet, TouchableOpacity,
-    TextInput, KeyboardAvoidingView, Alert, View, ActivityIndicator,
-    Modal // <-- Import Modal
+    TextInput, KeyboardAvoidingView, View, ActivityIndicator,
+    Modal
 } from 'react-native';
-import { FontAwesome } from '@expo/vector-icons'; // For the success icon
+import { FontAwesome } from '@expo/vector-icons';
 import { useAppContext } from '../context/AppContext';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.180.131.188:3001';
@@ -17,18 +17,17 @@ const AuthScreen = () => {
     const [password, setPassword] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    // --- State for custom modals ---
     const [isSuccessModalVisible, setSuccessModalVisible] = useState(false);
     const [modalMessage, setModalMessage] = useState('');
     const [authSuccessData, setAuthSuccessData] = useState(null);
-    const [isErrorModalVisible, setErrorModalVisible] = useState(false); // State for error modal
-    const [errorMessage, setErrorMessage] = useState('');           // State for error message
+    const [isErrorModalVisible, setErrorModalVisible] = useState(false);
+    const [errorMessage, setErrorMessage] = useState('');
 
     const handleAuth = async () => {
         let authData = {};
         let endpoint = '';
         let validationError = '';
-        
+
         if (isLogin) {
             if (!username || !password) {
                 validationError = 'Username and password are required.';
@@ -37,16 +36,34 @@ const AuthScreen = () => {
                 endpoint = '/login';
             }
         } else {
+            // --- NEW: Email and Password Validation Logic ---
+            const validateEmail = (emailToValidate) => {
+                // A common regex for email validation
+                const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+                return re.test(String(emailToValidate).toLowerCase());
+            };
+
             if (!username || !email || !password) {
                 validationError = 'All fields are mandatory.';
+            } else if (!validateEmail(email)) {
+                validationError = 'Please enter a valid email address.';
+            } else if (password.length < 8) {
+                validationError = 'Password must be at least 8 characters long.';
+            } else if (!/[A-Z]/.test(password)) {
+                validationError = 'Password must contain an uppercase letter.';
+            } else if (!/[a-z]/.test(password)) {
+                validationError = 'Password must contain a lowercase letter.';
+            } else if (!/\d/.test(password)) {
+                validationError = 'Password must contain a number.';
             } else {
+                // All validations passed for signup
                 authData = { username, email, password };
                 endpoint = '/signup';
             }
+            // --- END of New Validation Logic ---
         }
 
         if (validationError) {
-            // Show custom error modal for validation
             setErrorMessage(validationError);
             setErrorModalVisible(true);
             return;
@@ -64,18 +81,15 @@ const AuthScreen = () => {
             const data = await response.json();
 
             if (response.ok) {
-                // Show custom success modal
                 setModalMessage(data.message);
                 setAuthSuccessData(data.user);
                 setSuccessModalVisible(true);
             } else {
-                // Show custom error modal for auth failure
                 setErrorMessage(data.message || 'Something went wrong.');
                 setErrorModalVisible(true);
             }
         } catch (error) {
             console.error("Auth API call error:", error);
-            // Show custom error modal for network issues
             setErrorMessage('Could not connect to the server. Please try again.');
             setErrorModalVisible(true);
         } finally {
@@ -214,7 +228,6 @@ const styles = StyleSheet.create({
     buttonText: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
     switchText: { color: '#6074e0ff', marginTop: 20, fontSize: 16, fontWeight: '600' },
     
-    // --- Styles for Modals ---
     modalBackdrop: {
         flex: 1,
         justifyContent: 'center',
@@ -245,7 +258,7 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         marginTop: 15,
         marginBottom: 10,
-        color: '#E53E3E', // Error color for the title
+        color: '#E53E3E',
     },
     modalMessage: {
         fontSize: 16,
